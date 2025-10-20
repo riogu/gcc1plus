@@ -343,7 +343,7 @@ vim.api.nvim_create_user_command("GccCheck", function()
 
 	table.insert(results, "")
 	if all_ok then
-		table.insert(results, "✓ All checks passed! You're ready to develop GCC.")
+		table.insert(results, "✓ All checks passed! GCC is correctly built and configured.")
 	else
 		table.insert(results, '✗ Some checks failed. You may need to run "make" in your build directory.')
 	end
