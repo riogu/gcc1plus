@@ -268,7 +268,7 @@ COMMANDS:
     
     Examples:
       :FindTest constexpr     " Find all constexpr tests
-      :FindTest cpp26         " Find all C++26 tests
+      :FindTest cpp26/const   " Find all C++26 tests with const 
       :FindTest template      " Find template-related tests
 
 :GdbCC1plus <test_file> [flags]

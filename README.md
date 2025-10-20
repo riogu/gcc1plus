@@ -1,29 +1,22 @@
 # gcc1plus
-
 Neovim plugin for GCC compiler development. Provides integrated debugging and testing workflows for the GCC testsuite.
 The plugin is also showcased in this [video demonstration](https://www.youtube.com/watch?v=m0yDte273IQ)
 
 ## Overview
-
 This plugin automates common GCC development tasks:
 - Extracting cc1plus invocations from xg++ for GDB debugging
 - Parsing DejaGNU test directives (dg-options, dg-additional-options, dg-require-effective-target)
 - Running testsuite cases with proper libstdc++ include paths
 - Navigating and executing tests from within the editor
 
-
-
 ## Requirements
-
 - Neovim ≥ 0.8.0
 - GCC source tree with configured build directory
 - Compiled xg++ and cc1plus binaries in `build/gcc/`
 - [nvim-gdb](https://github.com/sakhnik/nvim-gdb) (optional, required for `:GdbCC1plus`)
 
 ## Installation
-
 ### lazy.nvim
-
 ```lua
 {
   'riogu/gcc1plus',
@@ -32,31 +25,30 @@ This plugin automates common GCC development tasks:
   },
 }
 ```
-
 ### packer.nvim
-
 ```lua
 use {
   'riogu/gcc1plus',
   requires = { 'sakhnik/nvim-gdb', run = './install.sh' },
 }
 ```
-
 ### vim-plug
-
 ```vim
 Plug 'sakhnik/nvim-gdb', { 'do': './install.sh' }
 Plug 'riogu/gcc1plus'
 ```
 
 ## Usage
-
 Open Neovim from any directory within your GCC source tree. The plugin automatically locates the root by searching for `gcc/` and `build/` directories.
 
-### Interactive Test Search
+### Interactive Test Search with FindTest
+**`:FindTest`** is the primary interface for working with GCC tests. It searches the testsuite and opens an interactive buffer where you can quickly navigate, compile, debug, or run tests.
 
-The main way to use this plugin is through the `FindTest` menu.
-`:FindTest <pattern>` opens a buffer with matching test files. Available keybindings:
+#### Quick Start
+```vim
+:FindTest constexpr
+```
+This opens a split window with all matching test files. Use these keybindings:
 
 | Key | Action |
 |-----|--------|
@@ -67,8 +59,59 @@ The main way to use this plugin is through the `FindTest` menu.
 | `l` | Show test log |
 | `q` | Close window |
 
-### Commands
+#### Example Workflows
 
+**Find and debug a specific test:**
+```vim
+:FindTest constexpr-virt1
+" Navigate to the test you want, press 'd' to start debugging in GDB
+```
+
+**Search for all C++26 tests:**
+```vim
+:FindTest cpp26
+" Browse through C++26 feature tests
+" Press <CR> to open a test file for editing
+```
+
+**Find template-related tests:**
+```vim
+:FindTest template
+" Useful when working on template bugs
+" Press 'r' on a test to quickly compile it
+```
+
+**Search by feature area:**
+```vim
+:FindTest concepts      " All concepts tests
+:FindTest modules       " Module-related tests
+:FindTest coroutines    " Coroutine tests
+:FindTest lambda        " Lambda expression tests
+```
+
+**Find tests with specific patterns:**
+```vim
+:FindTest crash         " Tests that previously caused crashes
+:FindTest pr12345       " Tests for specific bug report #12345
+:FindTest ice           " Internal compiler error tests
+```
+
+**Working on a specific C++ standard:**
+```vim
+:FindTest cpp2a         " C++20 tests
+:FindTest cpp23         " C++23 tests
+:FindTest cpp26         " C++26 tests
+```
+
+#### Example Usage
+1. Make changes to GCC frontend code (e.g., in `gcc/cp/`)
+2. Run `:FindTest <relevant-feature>` to find related tests
+3. Press `r` to compile tests and verify your changes
+4. Press `d` to debug any failing tests with GDB
+5. Press `t` to run official testsuite validation
+6. Press `l` to view test logs and PASS/FAIL results
+
+### Commands
 | Command | Function |
 |---------|----------|
 | `:FindTest <pattern>` | Search testsuite for matching files |
@@ -80,23 +123,28 @@ The main way to use this plugin is through the `FindTest` menu.
 | `:GccCheck` | Verify build environment |
 | `:GccHelp` | Display detailed usage information |
 
-### Examples
-
+### Direct Command Examples
 ```vim
 :GdbCC1plus gcc/testsuite/g++.dg/cpp26/constexpr-virt1.C -O2
 :RunTest gcc/testsuite/g++.dg/template/crash115.C
 :RunTestsuite gcc/testsuite/g++.dg/cpp2a/concepts-pr67178.C
-:FindTest constexpr
 ```
 
 ## Implementation Details
-
 ### Root Detection
-
 The plugin walks up the directory tree from `getcwd()` searching for a directory containing both `gcc/` and `build/` subdirectories.
 
-### DejaGNU Directive Parsing
+### Architecture Detection
+Automatically detects the target architecture by searching for `libstdc++-v3` in the build directory. Supports common targets including:
+- x86_64-pc-linux-gnu / x86_64-linux-gnu
+- aarch64-linux-gnu
+- arm-linux-gnueabihf
+- powerpc64le-linux-gnu
+- riscv64-linux-gnu
+- s390x-linux-gnu
+- i686-pc-linux-gnu / i686-linux-gnu
 
+### DejaGNU Directive Parsing
 Parses the following directives from test files:
 - `{ dg-options "..." }`
 - `{ dg-additional-options "..." }`
@@ -105,26 +153,23 @@ Parses the following directives from test files:
 Directives are extracted from C++ (`//`) and C (`/* */`) style comments within the first 2000 bytes of the test file.
 
 ### cc1plus Command Extraction
-
 Runs `xg++ -v` with proper include paths and parses the cc1plus invocation from verbose output. Include paths are automatically configured for:
-- `build/x86_64-pc-linux-gnu/libstdc++-v3/include/`
+- `build/<target-triplet>/libstdc++-v3/include/`
 - `libstdc++-v3/libsupc++/`
 - `libstdc++-v3/include/backward/`
 - `libstdc++-v3/testsuite/util/`
 
 ### Environment Validation
-
 `:GccCheck` verifies:
 - GCC root directory structure
 - Build directory exists
 - xg++ binary is executable
 - cc1plus binary exists
+- Target architecture detected
 - libstdc++-v3 source and build directories
 
 ## Directory Structure
-
 The plugin expects the following GCC tree structure:
-
 ```
 gcc-root/
 ├── gcc/
@@ -141,12 +186,11 @@ gcc-root/
     │   ├── xg++
     │   ├── cc1plus
     │   └── testsuite/
-    └── x86_64-pc-linux-gnu/
+    └── <target-triplet>/
         └── libstdc++-v3/
 ```
 
 ## References
-
 - [GCC Testing Documentation](https://gcc.gnu.org/install/test.html)
 - [DejaGNU Documentation](https://www.gnu.org/software/dejagnu/manual/)
 - [nvim-gdb](https://github.com/sakhnik/nvim-gdb)
