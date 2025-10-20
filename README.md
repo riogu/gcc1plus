@@ -61,49 +61,27 @@ This opens a split window with all matching test files. Use these keybindings:
 
 #### Example Workflows
 
-**Find and debug a specific test:**
+**Search by filename:**
 ```vim
 :FindTest constexpr-virt1
 " Navigate to the test you want, press 'd' to start debugging in GDB
 ```
 
-**Search for all C++26 tests:**
+**Search by directory path:**
 ```vim
-:FindTest cpp26
-" Browse through C++26 feature tests
-" Press <CR> to open a test file for editing
+:FindTest cpp26/constexpr       " All constexpr tests in cpp26
+:FindTest template/             " All tests in template directory
+:FindTest cpp2a/concepts        " C++20 concepts tests
 ```
 
-**Find template-related tests:**
+**Search by feature or bug number:**
 ```vim
-:FindTest template
-" Useful when working on template bugs
-" Press 'r' on a test to quickly compile it
+:FindTest concepts              " All concepts-related tests
+:FindTest pr12345               " Tests for bug report #12345
+:FindTest crash                 " Tests that previously caused crashes
 ```
 
-**Search by feature area:**
-```vim
-:FindTest concepts      " All concepts tests
-:FindTest modules       " Module-related tests
-:FindTest coroutines    " Coroutine tests
-:FindTest lambda        " Lambda expression tests
-```
-
-**Find tests with specific patterns:**
-```vim
-:FindTest crash         " Tests that previously caused crashes
-:FindTest pr12345       " Tests for specific bug report #12345
-:FindTest ice           " Internal compiler error tests
-```
-
-**Working on a specific C++ standard:**
-```vim
-:FindTest cpp2a         " C++20 tests
-:FindTest cpp23         " C++23 tests
-:FindTest cpp26         " C++26 tests
-```
-
-#### Example Usage
+#### Usage Example
 1. Make changes to GCC frontend code (e.g., in `gcc/cp/`)
 2. Run `:FindTest <relevant-feature>` to find related tests
 3. Press `r` to compile tests and verify your changes
