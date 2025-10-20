@@ -425,7 +425,7 @@ vim.api.nvim_create_user_command("RunTestsuite", function(opts)
 	local build_root = gcc_root .. "/build/gcc"
 	local cmd = string.format('cd %s && make check-g++ RUNTESTFLAGS="dg.exp=%s"', build_root, filename)
 
-	vim.notify("Running testsuite for: " .. filename .. "\nThis may take a moment...", vim.log.levels.INFO)
+	-- vim.notify("Running testsuite for: " .. filename .. "\nThis may take a moment...", vim.log.levels.INFO)
 	vim.cmd("terminal " .. cmd)
 end, { nargs = 1, complete = "file" })
 
