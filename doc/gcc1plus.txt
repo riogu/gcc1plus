@@ -1,0 +1,52 @@
+*gcc1plus.txt*  GCC Development Plugin for Neovim
+
+==============================================================================
+CONTENTS                                                    *gcc1plus-contents*
+
+    1. Introduction ........................... |gcc1plus-intro|
+    2. Requirements ........................... |gcc1plus-requirements|
+    3. Commands ............................... |gcc1plus-commands|
+    4. Configuration .......................... |gcc1plus-config|
+
+==============================================================================
+INTRODUCTION                                                   *gcc1plus-intro*
+
+GCC Development Plugin streamlines debugging and testing GCC C++ compiler
+changes directly from Neovim.
+
+==============================================================================
+REQUIREMENTS                                              *gcc1plus-requirements*
+
+- Neovim >= 0.8.0
+- GCC source tree with build directory
+- nvim-gdb (optional, for debugging)
+
+==============================================================================
+COMMANDS                                                    *gcc1plus-commands*
+
+:GccHelp                                                           *:GccHelp*
+    Show detailed help and usage information.
+
+:GccCheck                                                         *:GccCheck*
+    Verify your GCC environment is set up correctly.
+
+:GdbCC1plus {file} [flags]                                     *:GdbCC1plus*
+    Debug a test file with GDB. Automatically extracts cc1plus command.
+
+:RunTest {file}                                                   *:RunTest*
+    Compile a test file using xg++ with proper paths.
+
+:RunTestsuite {file}                                         *:RunTestsuite*
+    Run test via DejaGNU testsuite (make check-g++).
+
+:FindTest {pattern}                                              *:FindTest*
+    Search for tests matching pattern. Opens interactive results.
+
+:ShowTestOptions {file}                                   *:ShowTestOptions*
+    Display DejaGNU directives from test file.
+
+:ShowTestLog                                                   *:ShowTestLog*
+    View g++.log from last testsuite run.
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
