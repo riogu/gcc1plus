@@ -117,15 +117,6 @@ Runs `xg++ -v` with proper include paths and parses the cc1plus invocation from 
 - cc1plus binary exists
 - libstdc++-v3 source and build directories
 
-## Typical Development Workflow
-
-1. Modify GCC source code
-2. Rebuild: `cd build && make`
-3. Locate relevant tests: `:FindTest <pattern>`
-4. Debug regression: Press `d` on test file
-5. Verify fix: Press `t` to run via testsuite
-6. Check results: Press `l` to view `g++.log`
-
 ## Directory Structure
 
 The plugin expects the following GCC tree structure:
