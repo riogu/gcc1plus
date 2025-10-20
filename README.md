@@ -141,13 +141,6 @@ gcc-root/
         └── libstdc++-v3/
 ```
 
-## Limitations
-- DejaGNU directive parsing may not handle all edge cases
-- Requires standard GCC build directory layout
-
-## Contributing
-Bug reports and patches welcome. Submit via GitHub issues or pull requests.
-
 ## References
 
 - [GCC Testing Documentation](https://gcc.gnu.org/install/test.html)
