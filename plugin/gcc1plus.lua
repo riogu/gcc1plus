@@ -25,17 +25,60 @@ local function get_gcc_root()
 	return nil
 end
 
+-- Detect the target architecture directory in the build tree
+local function get_target_arch(gcc_root)
+	local build_dir = gcc_root .. "/build"
+
+	-- Common target triplets to check for
+	local common_targets = {
+		"x86_64-pc-linux-gnu",
+		"x86_64-linux-gnu",
+		"aarch64-linux-gnu",
+		"arm-linux-gnueabihf",
+		"powerpc64le-linux-gnu",
+		"riscv64-linux-gnu",
+		"s390x-linux-gnu",
+		"i686-pc-linux-gnu",
+		"i686-linux-gnu",
+	}
+
+	-- First, try to find any directory that contains libstdc++-v3
+	for _, target in ipairs(common_targets) do
+		local target_path = build_dir .. "/" .. target
+		local libstdcxx_path = target_path .. "/libstdc++-v3"
+		if vim.fn.isdirectory(libstdcxx_path) == 1 then
+			return target
+		end
+	end
+
+	-- If no common target found, search for any directory with libstdc++-v3
+	local find_cmd = string.format("find %s -maxdepth 2 -type d -name 'libstdc++-v3' 2>/dev/null", build_dir)
+	local handle = io.popen(find_cmd)
+	local result = handle:read("*l")
+	handle:close()
+
+	if result then
+		-- Extract the parent directory name (the target triplet)
+		local target = result:match(build_dir .. "/([^/]+)/libstdc%+%+%-v3")
+		if target then
+			return target
+		end
+	end
+
+	return nil
+end
+
 -- Validate GCC environment and show helpful error
 local function validate_gcc_env()
 	local gcc_root = get_gcc_root()
 	if not gcc_root then
 		vim.notify(
 			"Could not find GCC root directory.\n"
-				.. "Please open Neovim from within your GCC source tree (anywhere inside gcc-trunk/ or gcc-source/).\n"
+				.. "Please open Neovim from within your GCC source tree (anywhere inside gcc-trunk/ or gcc-source/, etc).\n"
 				.. "The GCC root should contain both gcc/ and build/ directories.",
 			vim.log.levels.ERROR
 		)
-		return nil
+		return nil, nil
 	end
 
 	-- Check if build directory exists and has been built
@@ -50,10 +93,22 @@ local function validate_gcc_env()
 				.. 'Please run "make" in your build directory first.',
 			vim.log.levels.ERROR
 		)
-		return nil
+		return nil, nil
 	end
 
-	return gcc_root
+	-- Detect target architecture
+	local target_arch = get_target_arch(gcc_root)
+	if not target_arch then
+		vim.notify(
+			"Could not detect target architecture.\n"
+				.. "Expected to find libstdc++-v3 in build/<target-triplet>/ directory.\n"
+				.. "Please ensure libstdc++ has been built.",
+			vim.log.levels.ERROR
+		)
+		return nil, nil
+	end
+
+	return gcc_root, target_arch
 end
 
 -- Parse DejaGNU directives from test file
@@ -135,19 +190,19 @@ local function get_cc1plus_command(test_file, extra_args)
 		extra_args = dejagnu_opts .. " " .. extra_args
 	end
 
-	local gcc_root = validate_gcc_env()
+	local gcc_root, target_arch = validate_gcc_env()
 	if not gcc_root then
 		return nil
 	end
 
-	local libstdcxx_build = gcc_root .. "/build/x86_64-pc-linux-gnu/libstdc++-v3"
+	local libstdcxx_build = gcc_root .. "/build/" .. target_arch .. "/libstdc++-v3"
 	local libstdcxx_source = gcc_root .. "/libstdc++-v3"
 	local xgpp_path = gcc_root .. "/build/gcc/xg++"
 	local gcc_build = gcc_root .. "/build/gcc"
 
 	local xgpp_cmd = string.format(
 		"%s -B%s -nostdinc++ "
-			.. "-I%s/include/x86_64-pc-linux-gnu "
+			.. "-I%s/include/%s "
 			.. "-I%s/include "
 			.. "-I%s/libsupc++ "
 			.. "-I%s/include/backward "
@@ -156,6 +211,7 @@ local function get_cc1plus_command(test_file, extra_args)
 		xgpp_path,
 		gcc_build,
 		libstdcxx_build,
+		target_arch,
 		libstdcxx_build,
 		libstdcxx_source,
 		libstdcxx_source,
@@ -255,21 +311,25 @@ COMMANDS:
 :GccCheck
     Verify your GCC environment is set up correctly.
     Checks for xg++, cc1plus, libstdc++ paths, etc.
+    Also displays the detected target architecture.
 
 SETUP REQUIREMENTS:
 ------------------
 - GCC source tree with gcc/ directory
 - build/ directory at same level as gcc/
 - Compiled xg++ and cc1plus in build/gcc/
-- libstdc++-v3 built in build/x86_64-pc-linux-gnu/
+- libstdc++-v3 built in build/<target-triplet>/
 
-The plugin will auto-detect your GCC root by walking up from your current
-directory. No manual configuration needed!
+The plugin will auto-detect your GCC root and target architecture by walking
+up from your current directory. No manual configuration needed!
+
+Supported architectures: x86_64, aarch64, arm, powerpc64le, riscv64, s390x, i686
 
 TROUBLESHOOTING:
 ---------------
 - "GCC root not found": Open Neovim from inside your GCC source tree
 - "xg++ not found": Run 'make' in your build directory
+- "Target architecture not detected": Ensure libstdc++ is built
 - "No tests found": Check your search pattern or testsuite path
 
 For more info or to report issues:
@@ -303,31 +363,48 @@ vim.api.nvim_create_user_command("GccCheck", function()
 		return
 	end
 
+	local target_arch = get_target_arch(gcc_root)
+
 	local checks = {
 		{ path = gcc_root .. "/gcc", desc = "GCC source directory" },
 		{ path = gcc_root .. "/build", desc = "Build directory" },
 		{ path = gcc_root .. "/build/gcc/xg++", desc = "xg++ compiler", executable = true },
 		{ path = gcc_root .. "/build/gcc/cc1plus", desc = "cc1plus binary", executable = true },
-		{ path = gcc_root .. "/build/x86_64-pc-linux-gnu/libstdc++-v3", desc = "libstdc++ build" },
+		{
+			path = target_arch and (gcc_root .. "/build/" .. target_arch .. "/libstdc++-v3") or "",
+			desc = "libstdc++ build",
+		},
 		{ path = gcc_root .. "/libstdc++-v3", desc = "libstdc++ source" },
 	}
 
 	local all_ok = true
-	local results = { "GCC Environment Check", "===================", "", "GCC Root: " .. gcc_root, "" }
+	local results = {
+		"GCC Environment Check",
+		"===================",
+		"",
+		"GCC Root: " .. gcc_root,
+		"Target:   " .. (target_arch or "NOT DETECTED"),
+		"",
+	}
 
 	for _, check in ipairs(checks) do
-		local ok = false
-		if check.executable then
-			ok = vim.fn.executable(check.path) == 1
-		else
-			ok = vim.fn.isdirectory(check.path) == 1 or vim.fn.filereadable(check.path) == 1
-		end
-
-		if ok then
-			table.insert(results, "✓ " .. check.desc)
-		else
-			table.insert(results, "✗ " .. check.desc .. " (not found: " .. check.path .. ")")
+		if check.path == "" then
+			table.insert(results, "✗ " .. check.desc .. " (architecture not detected)")
 			all_ok = false
+		else
+			local ok = false
+			if check.executable then
+				ok = vim.fn.executable(check.path) == 1
+			else
+				ok = vim.fn.isdirectory(check.path) == 1 or vim.fn.filereadable(check.path) == 1
+			end
+
+			if ok then
+				table.insert(results, "✓ " .. check.desc)
+			else
+				table.insert(results, "✗ " .. check.desc .. " (not found: " .. check.path .. ")")
+				all_ok = false
+			end
 		end
 	end
 
@@ -352,7 +429,7 @@ vim.api.nvim_create_user_command("GdbCC1plus", function(opts)
 	local test_file = args[1]
 	local extra_args = #args > 1 and table.concat(vim.list_slice(args, 2), " ") or ""
 
-	local gcc_root = validate_gcc_env()
+	local gcc_root, target_arch = validate_gcc_env()
 	if not gcc_root then
 		return
 	end
@@ -407,7 +484,7 @@ vim.api.nvim_create_user_command("RunTestsuite", function(opts)
 		return
 	end
 
-	local gcc_root = validate_gcc_env()
+	local gcc_root, target_arch = validate_gcc_env()
 	if not gcc_root then
 		return
 	end
@@ -420,7 +497,7 @@ end, { nargs = 1, complete = "file" })
 
 -- Show test log
 vim.api.nvim_create_user_command("ShowTestLog", function()
-	local gcc_root = validate_gcc_env()
+	local gcc_root, target_arch = validate_gcc_env()
 	if not gcc_root then
 		return
 	end
@@ -468,13 +545,13 @@ vim.api.nvim_create_user_command("RunTest", function(opts)
 	end
 
 	local test_file = opts.args
-	local gcc_root = validate_gcc_env()
+	local gcc_root, target_arch = validate_gcc_env()
 	if not gcc_root then
 		return
 	end
 
 	local dejagnu_opts = parse_dejagnu_options(test_file)
-	local libstdcxx_build = gcc_root .. "/build/x86_64-pc-linux-gnu/libstdc++-v3"
+	local libstdcxx_build = gcc_root .. "/build/" .. target_arch .. "/libstdc++-v3"
 	local libstdcxx_source = gcc_root .. "/libstdc++-v3"
 	local xgpp_path = gcc_root .. "/build/gcc/xg++"
 	local gcc_build = gcc_root .. "/build/gcc"
@@ -482,7 +559,7 @@ vim.api.nvim_create_user_command("RunTest", function(opts)
 
 	local cmd = string.format(
 		"cd %s && %s -B%s -nostdinc++ "
-			.. "-I%s/include/x86_64-pc-linux-gnu "
+			.. "-I%s/include/%s "
 			.. "-I%s/include "
 			.. "-I%s/libsupc++ "
 			.. "-I%s/include/backward "
@@ -492,6 +569,7 @@ vim.api.nvim_create_user_command("RunTest", function(opts)
 		xgpp_path,
 		gcc_build,
 		libstdcxx_build,
+		target_arch,
 		libstdcxx_build,
 		libstdcxx_source,
 		libstdcxx_source,
@@ -516,7 +594,7 @@ vim.api.nvim_create_user_command("FindTest", function(opts)
 	end
 
 	local pattern = opts.args
-	local gcc_root = validate_gcc_env()
+	local gcc_root, target_arch = validate_gcc_env()
 	if not gcc_root then
 		return
 	end
