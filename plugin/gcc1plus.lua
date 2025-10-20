@@ -256,16 +256,6 @@ COMMANDS:
     Verify your GCC environment is set up correctly.
     Checks for xg++, cc1plus, libstdc++ paths, etc.
 
-TYPICAL WORKFLOW:
-----------------
-1. Make changes to GCC source code
-2. Rebuild: cd build && make
-3. Find relevant tests: :FindTest <pattern>
-4. Debug with GDB: press 'd' on a test
-5. Or compile quickly: press 'r' on a test
-6. Run full testsuite: press 't' on a test
-7. Check results: press 'l' to view g++.log
-
 SETUP REQUIREMENTS:
 ------------------
 - GCC source tree with gcc/ directory
@@ -283,7 +273,7 @@ TROUBLESHOOTING:
 - "No tests found": Check your search pattern or testsuite path
 
 For more info or to report issues:
-https://github.com/yourusername/gcc-nvim-dev
+https://github.com/riogu/gcc1plus
 ]]
 
 	local buf = vim.api.nvim_create_buf(false, true)
@@ -425,7 +415,6 @@ vim.api.nvim_create_user_command("RunTestsuite", function(opts)
 	local build_root = gcc_root .. "/build/gcc"
 	local cmd = string.format('cd %s && make check-g++ RUNTESTFLAGS="dg.exp=%s"', build_root, filename)
 
-	-- vim.notify("Running testsuite for: " .. filename .. "\nThis may take a moment...", vim.log.levels.INFO)
 	vim.cmd("terminal " .. cmd)
 end, { nargs = 1, complete = "file" })
 
