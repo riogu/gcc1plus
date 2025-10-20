@@ -198,6 +198,23 @@ QUICK START:
 COMMANDS:
 ---------
 
+:FindTest <pattern>
+    Search for test files matching a pattern in the testsuite.
+    Opens results in a split window with helpful keybindings.
+    
+    Keybindings in results window:
+      <CR> - Open the test file for editing
+      d    - Debug with GDB (runs :GdbCC1plus)
+      r    - Compile test (runs :RunTest)
+      t    - Run via testsuite (runs :RunTestsuite)
+      l    - Show test log (g++.log)
+      q    - Close the results window
+    
+    Examples:
+      :FindTest constexpr     " Find all constexpr tests
+      :FindTest cpp26         " Find all C++26 tests
+      :FindTest template      " Find template-related tests
+
 :GdbCC1plus <test_file> [flags]
     Debug a test file with GDB. Automatically extracts the cc1plus command
     from xg++ including all the right include paths and flags.
@@ -222,23 +239,6 @@ COMMANDS:
     
     Example:
       :RunTestsuite gcc/testsuite/g++.dg/cpp26/constexpr-virt1.C
-
-:FindTest <pattern>
-    Search for test files matching a pattern in the testsuite.
-    Opens results in a split window with helpful keybindings.
-    
-    Keybindings in results window:
-      <CR> - Open the test file for editing
-      d    - Debug with GDB (runs :GdbCC1plus)
-      r    - Compile test (runs :RunTest)
-      t    - Run via testsuite (runs :RunTestsuite)
-      l    - Show test log (g++.log)
-      q    - Close the results window
-    
-    Examples:
-      :FindTest constexpr     " Find all constexpr tests
-      :FindTest cpp26         " Find all C++26 tests
-      :FindTest template      " Find template-related tests
 
 :ShowTestOptions <test_file>
     Display DejaGNU directives found in a test file (dg-options, etc.).
