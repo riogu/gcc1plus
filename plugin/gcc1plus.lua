@@ -1,4 +1,4 @@
--- plugin/gcc-dev.lua
+-- plugin/gcc1plus.lua
 -- GCC Development Plugin for Neovim
 -- Provides commands for debugging and testing GCC compiler changes
 
