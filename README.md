@@ -50,14 +50,28 @@ Plug 'riogu/gcc1plus'
 
 Open Neovim from any directory within your GCC source tree. The plugin automatically locates the root by searching for `gcc/` and `build/` directories.
 
+### Interactive Test Search
+
+The main way to use this plugin is through the `FindTest` menu.
+`:FindTest <pattern>` opens a buffer with matching test files. Available keybindings:
+
+| Key | Action |
+|-----|--------|
+| `<CR>` | Open test file |
+| `d` | Debug with GDB (`:GdbCC1plus`) |
+| `r` | Compile test (`:RunTest`) |
+| `t` | Run via testsuite (`:RunTestsuite`) |
+| `l` | Show test log |
+| `q` | Close window |
+
 ### Commands
 
 | Command | Function |
 |---------|----------|
+| `:FindTest <pattern>` | Search testsuite for matching files |
 | `:GdbCC1plus <file> [flags]` | Launch GDB with extracted cc1plus command |
 | `:RunTest <file>` | Compile test file with xg++ |
 | `:RunTestsuite <file>` | Execute test via `make check-g++` |
-| `:FindTest <pattern>` | Search testsuite for matching files |
 | `:ShowTestOptions <file>` | Display parsed DejaGNU directives |
 | `:ShowTestLog` | Open `g++.log` from last testsuite run |
 | `:GccCheck` | Verify build environment |
@@ -71,19 +85,6 @@ Open Neovim from any directory within your GCC source tree. The plugin automatic
 :RunTestsuite gcc/testsuite/g++.dg/cpp2a/concepts-pr67178.C
 :FindTest constexpr
 ```
-
-### Interactive Test Search
-
-`:FindTest <pattern>` opens a buffer with matching test files. Available keybindings:
-
-| Key | Action |
-|-----|--------|
-| `<CR>` | Open test file |
-| `d` | Debug with GDB (`:GdbCC1plus`) |
-| `r` | Compile test (`:RunTest`) |
-| `t` | Run via testsuite (`:RunTestsuite`) |
-| `l` | Show test log |
-| `q` | Close window |
 
 ## Implementation Details
 
