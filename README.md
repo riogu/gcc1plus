@@ -11,7 +11,8 @@ This plugin automates common GCC development tasks:
 
 ## Requirements
 - Neovim ≥ 0.8.0
-- GCC source tree with configured build directory
+- GCC source tree with gcc/ directory
+- Build directory (either inside source or as sibling)
 - Compiled xg++ and cc1plus binaries in `build/gcc/`
 - [nvim-gdb](https://github.com/sakhnik/nvim-gdb) (optional, required for `:GdbCC1plus`)
 
@@ -39,7 +40,7 @@ Plug 'riogu/gcc1plus'
 ```
 
 ## Usage
-Open Neovim from any directory within your GCC source tree. The plugin automatically locates the root by searching for `gcc/` and `build/` directories.
+Open Neovim from any directory within your GCC source tree. The plugin automatically locates the source root (directory containing `gcc/`) and build directory (either `source/build/` or sibling `../build/`).
 
 ### Interactive Test Search with FindTest
 **`:FindTest`** is the primary interface for working with GCC tests. It searches the testsuite and opens an interactive buffer where you can quickly navigate, compile, debug, or run tests.
@@ -110,7 +111,9 @@ This opens a split window with all matching test files. Use these keybindings:
 
 ## Implementation Details
 ### Root Detection
-The plugin walks up the directory tree from `getcwd()` searching for a directory containing both `gcc/` and `build/` subdirectories.
+The plugin walks up from `getcwd()` to find the GCC source directory (containing `gcc/`), then locates the build directory:
+- First checks: `source/build/`
+- Then checks: `../build/` (sibling to source)
 
 ### Architecture Detection
 Automatically detects the target architecture by searching for `libstdc++-v3` in the build directory. Supports common targets including:
@@ -139,33 +142,45 @@ Runs `xg++ -v` with proper include paths and parses the cc1plus invocation from 
 
 ### Environment Validation
 `:GccCheck` verifies:
-- GCC root directory structure
-- Build directory exists
+- GCC source directory structure
+- Build directory location (shows detected path)
 - xg++ binary is executable
 - cc1plus binary exists
 - Target architecture detected
 - libstdc++-v3 source and build directories
 
 ## Directory Structure
-The plugin expects the following GCC tree structure:
+The plugin supports two common GCC build layouts:
+
+**Structure 1 (build inside source):**
 ```
-gcc-root/
+gcc-source/
 ├── gcc/
 │   ├── cp/
-│   ├── testsuite/
-│   │   └── g++.dg/
+│   ├── testsuite/g++.dg/
 │   └── ...
 ├── libstdc++-v3/
-│   ├── include/
-│   ├── libsupc++/
-│   └── testsuite/
 └── build/
     ├── gcc/
     │   ├── xg++
-    │   ├── cc1plus
-    │   └── testsuite/
-    └── <target-triplet>/
-        └── libstdc++-v3/
+    │   └── cc1plus
+    └── <target-triplet>/libstdc++-v3/
+```
+
+**Structure 2 (build as sibling):**
+```
+project/
+├── source/
+│   ├── gcc/
+│   │   ├── cp/
+│   │   ├── testsuite/g++.dg/
+│   │   └── ...
+│   └── libstdc++-v3/
+└── build/
+    ├── gcc/
+    │   ├── xg++
+    │   └── cc1plus
+    └── <target-triplet>/libstdc++-v3/
 ```
 
 ## References
