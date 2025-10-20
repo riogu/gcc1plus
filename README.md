@@ -10,6 +10,9 @@ This plugin automates common GCC development tasks:
 - Running testsuite cases with proper libstdc++ include paths
 - Navigating and executing tests from within the editor
 
+[Video demonstration](https://www.youtube.com/watch?v=m0yDte273IQ)
+
+
 ## Requirements
 
 - Neovim ≥ 0.8.0
