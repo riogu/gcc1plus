@@ -169,6 +169,5 @@ gcc-root/
 ```
 
 ## References
-- [GCC Testing Documentation](https://gcc.gnu.org/install/test.html)
 - [DejaGNU Documentation](https://www.gnu.org/software/dejagnu/manual/)
 - [nvim-gdb](https://github.com/sakhnik/nvim-gdb)
