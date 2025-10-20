@@ -1,6 +1,7 @@
 # gcc1plus
 
 Neovim plugin for GCC compiler development. Provides integrated debugging and testing workflows for the GCC testsuite.
+The plugin is also showcased in this [video demonstration](https://www.youtube.com/watch?v=m0yDte273IQ)
 
 ## Overview
 
@@ -10,7 +11,6 @@ This plugin automates common GCC development tasks:
 - Running testsuite cases with proper libstdc++ include paths
 - Navigating and executing tests from within the editor
 
-[Video demonstration](https://www.youtube.com/watch?v=m0yDte273IQ)
 
 
 ## Requirements
