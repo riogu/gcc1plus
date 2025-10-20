@@ -50,6 +50,8 @@ Plug 'riogu/gcc1plus'
 
 Open Neovim from any directory within your GCC source tree. The plugin automatically locates the root by searching for `gcc/` and `build/` directories.
 
+![Plugin showcase video](assets/gcc1plus_demo.gif)
+
 ### Interactive Test Search
 
 The main way to use this plugin is through the `FindTest` menu.
