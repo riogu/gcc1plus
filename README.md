@@ -151,18 +151,11 @@ gcc-root/
 ```
 
 ## Limitations
-
-- Assumes x86_64-pc-linux-gnu target architecture
 - DejaGNU directive parsing may not handle all edge cases
 - Requires standard GCC build directory layout
 
 ## Contributing
-
 Bug reports and patches welcome. Submit via GitHub issues or pull requests.
-
-## License
-
-MIT License
 
 ## References
 
