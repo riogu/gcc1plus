@@ -168,6 +168,27 @@ local function parse_dejagnu_options(test_file)
 				table.insert(options, dg_additional)
 			end
 
+			-- Look for dg-add-options (e.g., pthread, openmp, tls)
+			local dg_add = comment:match("{ dg%-add%-options (%S+)")
+			if dg_add then
+				-- Map common dg-add-options features to compiler flags
+				local feature_flags = {
+					pthread = "-pthread",
+					tls = "-ftls-model=global-dynamic",
+					bind_pic_locally = "-fPIE",
+					c99_runtime = "-std=c99",
+					ieee = "-fno-unsafe-math-optimizations",
+				}
+				if feature_flags[dg_add] then
+					table.insert(options, feature_flags[dg_add])
+				end
+			end
+
+			-- Look for dg-require-effective-target with fopenmp
+			if comment:match("{ dg%-require%-effective%-target fopenmp }") then
+				table.insert(options, "-fopenmp")
+			end
+
 			-- Look for std= requirements
 			local std_req = comment:match("{ dg%-require%-effective%-target c%+%+(%d+)") or comment:match("c%+%+(%d+)")
 			if std_req and not line:match("dg%-options") then
@@ -193,6 +214,27 @@ local function parse_dejagnu_options(test_file)
 			local dg_options = line:match('{ dg%-options "([^"]*)" }')
 			if dg_options then
 				table.insert(options, dg_options)
+			end
+			local dg_additional = line:match('{ dg%-additional%-options "([^"]*)" }')
+			if dg_additional then
+				table.insert(options, dg_additional)
+			end
+			-- Check for dg-add-options in C comments too
+			local dg_add = line:match("{ dg%-add%-options (%S+)")
+			if dg_add then
+				local feature_flags = {
+					pthread = "-pthread",
+					tls = "-ftls-model=global-dynamic",
+					bind_pic_locally = "-fPIE",
+					c99_runtime = "-std=c99",
+					ieee = "-fno-unsafe-math-optimizations",
+				}
+				if feature_flags[dg_add] then
+					table.insert(options, feature_flags[dg_add])
+				end
+			end
+			if line:match("{ dg%-require%-effective%-target fopenmp }") then
+				table.insert(options, "-fopenmp")
 			end
 		end
 		if line:match("%*/") then
@@ -311,7 +353,8 @@ COMMANDS:
 
 :RunTest <test_file>
     Quickly compile a test file using xg++ with proper libstdc++ paths.
-    Automatically parses DejaGNU directives (dg-options, dg-additional-options).
+    Automatically parses DejaGNU directives (dg-options, dg-additional-options,
+    dg-add-options, dg-require-effective-target).
     Opens compilation result in a terminal window.
     
     Examples:
@@ -358,6 +401,14 @@ The plugin will auto-detect your GCC root and build directory by walking
 up from your current directory. No manual configuration needed!
 
 Supported architectures: x86_64, aarch64, arm, powerpc64le, riscv64, s390x, i686
+
+DEJAGNU DIRECTIVES PARSED:
+--------------------------
+The plugin automatically parses these DejaGNU directives:
+- dg-options: Compiler options
+- dg-additional-options: Additional compiler options
+- dg-add-options: Feature-based options (pthread, tls, openmp, etc.)
+- dg-require-effective-target: Target requirements (c++NN, fopenmp)
 
 TROUBLESHOOTING:
 ---------------
