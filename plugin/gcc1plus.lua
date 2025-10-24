@@ -766,5 +766,3 @@ vim.api.nvim_create_user_command("FindTest", function(opts)
 	)
 end, { nargs = 1 })
 
--- Show welcome message on first load
-vim.notify("GCC Dev Plugin loaded. Type :GccHelp for usage info.", vim.log.levels.INFO)
