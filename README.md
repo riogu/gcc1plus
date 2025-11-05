@@ -4,10 +4,10 @@ The plugin is also showcased in this [video demonstration](https://www.youtube.c
 
 ## Overview
 This plugin automates common GCC development tasks:
+- Navigating and executing tests from within neovim
 - Extracting cc1plus invocations from xg++ for GDB debugging
 - Parsing DejaGNU test directives (dg-options, dg-additional-options, dg-require-effective-target)
 - Running testsuite cases with proper libstdc++ include paths
-- Navigating and executing tests from within the editor
 
 ## Requirements
 - Neovim ≥ 0.8.0
