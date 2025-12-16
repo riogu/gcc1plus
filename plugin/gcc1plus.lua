@@ -297,11 +297,24 @@ local function get_cc1plus_command(test_file, extra_args)
 	handle:close()
 
 	-- Extract the cc1plus invocation from -v output
+	-- The cc1plus command may be split across multiple lines if the terminal wraps it
+	-- We need to find the line starting with the cc1plus path
+	local cc1plus_line = nil
+
 	for line in output:gmatch("[^\r\n]+") do
-		if line:match("cc1plus") or line:match("cc1") then
-			local cc1plus_cmd = line:match("^%s*(.-)%s*$") -- trim whitespace
-			return cc1plus_cmd
+		-- Check if this line contains the cc1plus invocation
+		if line:match("/cc1plus%s") or line:match("^%s*cc1plus%s") then
+			cc1plus_line = line
+			break
 		end
+	end
+
+	if cc1plus_line then
+		-- Trim leading/trailing whitespace
+		cc1plus_line = cc1plus_line:match("^%s*(.-)%s*$")
+		-- Normalize multiple spaces to single spaces (handles terminal line-wrap artifacts)
+		cc1plus_line = cc1plus_line:gsub("%s+", " ")
+		return cc1plus_line
 	end
 
 	return nil
@@ -765,4 +778,3 @@ vim.api.nvim_create_user_command("FindTest", function(opts)
 		vim.log.levels.INFO
 	)
 end, { nargs = 1 })
-
