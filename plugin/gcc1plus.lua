@@ -1,11 +1,64 @@
 -- plugin/gcc1plus.lua
 -- GCC Development Plugin for Neovim
 -- Provides commands for debugging and testing GCC compiler changes
+-- Supports multiple frontends: C++ (default) and Rust (gccrs)
 
 if vim.g.loaded_gcc_dev then
 	return
 end
 vim.g.loaded_gcc_dev = 1
+
+-- =============================================================================
+-- Frontend configurations
+-- =============================================================================
+
+local frontends = {
+	cpp = {
+		name = "C++",
+		driver = "xg++",
+		frontend_binary = "cc1plus",
+		testsuite_subdir = "g++.dg",
+		test_extensions = { "C", "cc" },
+		check_target = "check-g++",
+		log_patterns = {
+			"gcc/testsuite/g++/g++.log",
+			"gcc/testsuite/g++.log",
+		},
+		needs_libstdcxx = true,
+		runtestflags_fmt = "dg.exp=%s",
+		verbose_flag = "-v",
+	},
+	rust = {
+		name = "Rust (gccrs)",
+		driver = "gccrs",
+		frontend_binary = "crab1",
+		testsuite_subdir = "rust",
+		test_extensions = { "rs" },
+		check_target = "check-rust",
+		log_patterns = {
+			"gcc/testsuite/rust/rust.log",
+			"gcc/testsuite/rust.log",
+		},
+		needs_libstdcxx = false,
+		-- For gccrs, the exp file is inferred from the test's parent directory
+		-- e.g. rust/compile/foo.rs -> compile.exp=foo.rs
+		-- Fallback to compile.exp if we can't detect
+		runtestflags_fmt = nil, -- uses get_runtestflags() instead
+		-- gccrs uses --verbose instead of -v
+		verbose_flag = "--verbose",
+	},
+}
+
+-- Active frontend (default: C++)
+local active_frontend_key = "cpp"
+
+local function get_frontend()
+	return frontends[active_frontend_key]
+end
+
+-- =============================================================================
+-- Environment detection
+-- =============================================================================
 
 -- Get the GCC source root directory by walking up from current directory
 -- Returns the directory containing the gcc/ subdirectory
@@ -13,12 +66,10 @@ local function get_gcc_root()
 	local check_dir = vim.fn.getcwd()
 
 	while check_dir ~= "/" do
-		-- Check if this looks like a GCC source root (has gcc/ subdir)
 		local gcc_dir = check_dir .. "/gcc"
 		if vim.fn.isdirectory(gcc_dir) == 1 then
 			return check_dir
 		end
-		-- Go up one level
 		check_dir = vim.fn.fnamemodify(check_dir, ":h")
 	end
 
@@ -28,13 +79,11 @@ end
 -- Get the build root directory
 -- First tries gcc_root/build, then parent_of_gcc_root/build
 local function get_build_root(gcc_root)
-	-- Try build inside gcc source directory
 	local build_in_source = gcc_root .. "/build"
 	if vim.fn.isdirectory(build_in_source) == 1 then
 		return build_in_source
 	end
 
-	-- Try build as sibling to gcc source directory
 	local parent_dir = vim.fn.fnamemodify(gcc_root, ":h")
 	local build_sibling = parent_dir .. "/build"
 	if vim.fn.isdirectory(build_sibling) == 1 then
@@ -46,7 +95,6 @@ end
 
 -- Detect the target architecture directory in the build tree
 local function get_target_arch(build_root)
-	-- Common target triplets to check for
 	local common_targets = {
 		"x86_64-pc-linux-gnu",
 		"x86_64-linux-gnu",
@@ -59,7 +107,6 @@ local function get_target_arch(build_root)
 		"i686-linux-gnu",
 	}
 
-	-- First, try to find any directory that contains libstdc++-v3
 	for _, target in ipairs(common_targets) do
 		local target_path = build_root .. "/" .. target
 		local libstdcxx_path = target_path .. "/libstdc++-v3"
@@ -68,14 +115,12 @@ local function get_target_arch(build_root)
 		end
 	end
 
-	-- If no common target found, search for any directory with libstdc++-v3
 	local find_cmd = string.format("find %s -maxdepth 2 -type d -name 'libstdc++-v3' 2>/dev/null", build_root)
 	local handle = io.popen(find_cmd)
 	local result = handle:read("*l")
 	handle:close()
 
 	if result then
-		-- Extract the parent directory name (the target triplet)
 		local target = result:match(build_root .. "/([^/]+)/libstdc%+%+%-v3")
 		if target then
 			return target
@@ -85,9 +130,11 @@ local function get_target_arch(build_root)
 	return nil
 end
 
--- Validate GCC environment and show helpful error
--- Returns gcc_root, build_root, target_arch
+-- Validate GCC environment and show helpful errors
+-- Returns gcc_root, build_root, target_arch (target_arch may be nil for non-C++ frontends)
 local function validate_gcc_env()
+	local fe = get_frontend()
+
 	local gcc_root = get_gcc_root()
 	if not gcc_root then
 		vim.notify(
@@ -104,21 +151,28 @@ local function validate_gcc_env()
 			"Could not find build directory.\n"
 				.. "Expected build/ either inside the GCC source directory or as a sibling to it.\n"
 				.. "Looked for:\n"
-				.. "  - " .. gcc_root .. "/build\n"
-				.. "  - " .. vim.fn.fnamemodify(gcc_root, ":h") .. "/build",
+				.. "  - "
+				.. gcc_root
+				.. "/build\n"
+				.. "  - "
+				.. vim.fn.fnamemodify(gcc_root, ":h")
+				.. "/build",
 			vim.log.levels.ERROR
 		)
 		return nil, nil, nil
 	end
 
-	-- Check if build directory has been built
+	-- Check for the frontend-specific driver binary
 	local build_gcc = build_root .. "/gcc"
-	local xgpp = build_gcc .. "/xg++"
-	if vim.fn.executable(xgpp) ~= 1 then
+	local driver_path = build_gcc .. "/" .. fe.driver
+	if vim.fn.executable(driver_path) ~= 1 then
 		vim.notify(
-			"GCC build not found or incomplete.\n"
-				.. "Expected xg++ at: "
-				.. xgpp
+			fe.name
+				.. " driver not found.\n"
+				.. "Expected "
+				.. fe.driver
+				.. " at: "
+				.. driver_path
 				.. "\n"
 				.. 'Please run "make" in your build directory first.',
 			vim.log.levels.ERROR
@@ -126,22 +180,45 @@ local function validate_gcc_env()
 		return nil, nil, nil
 	end
 
-	-- Detect target architecture
-	local target_arch = get_target_arch(build_root)
-	if not target_arch then
+	-- Check for the frontend binary
+	local frontend_path = build_gcc .. "/" .. fe.frontend_binary
+	if vim.fn.executable(frontend_path) ~= 1 then
 		vim.notify(
-			"Could not detect target architecture.\n"
-				.. "Expected to find libstdc++-v3 in build/<target-triplet>/ directory.\n"
-				.. "Please ensure libstdc++ has been built.",
+			fe.name
+				.. " frontend binary not found.\n"
+				.. "Expected "
+				.. fe.frontend_binary
+				.. " at: "
+				.. frontend_path
+				.. "\n"
+				.. 'Please run "make" in your build directory first.',
 			vim.log.levels.ERROR
 		)
 		return nil, nil, nil
 	end
 
+	-- Detect target architecture (only required for frontends that need libstdc++)
+	local target_arch = nil
+	if fe.needs_libstdcxx then
+		target_arch = get_target_arch(build_root)
+		if not target_arch then
+			vim.notify(
+				"Could not detect target architecture.\n"
+					.. "Expected to find libstdc++-v3 in build/<target-triplet>/ directory.\n"
+					.. "Please ensure libstdc++ has been built.",
+				vim.log.levels.ERROR
+			)
+			return nil, nil, nil
+		end
+	end
+
 	return gcc_root, build_root, target_arch
 end
 
--- Parse DejaGNU directives from test file
+-- =============================================================================
+-- DejaGNU directive parsing
+-- =============================================================================
+
 local function parse_dejagnu_options(test_file)
 	local file = io.open(test_file, "r")
 	if not file then
@@ -152,26 +229,22 @@ local function parse_dejagnu_options(test_file)
 	local in_comment_block = false
 
 	for line in file:lines() do
-		-- Handle C++ style comments
+		-- Handle // style comments (works for both C++ and Rust)
 		local comment = line:match("^%s*//(.*)$")
 		if comment then
-			-- Look for dg-options
 			local dg_options = comment:match('{ dg%-options "([^"]*)" }') or comment:match("{ dg%-options '([^']*)' }")
 			if dg_options then
 				table.insert(options, dg_options)
 			end
 
-			-- Look for dg-additional-options
 			local dg_additional = comment:match('{ dg%-additional%-options "([^"]*)" }')
 				or comment:match("{ dg%-additional%-options '([^']*)' }")
 			if dg_additional then
 				table.insert(options, dg_additional)
 			end
 
-			-- Look for dg-add-options (e.g., pthread, openmp, tls)
 			local dg_add = comment:match("{ dg%-add%-options (%S+)")
 			if dg_add then
-				-- Map common dg-add-options features to compiler flags
 				local feature_flags = {
 					pthread = "-pthread",
 					tls = "-ftls-model=global-dynamic",
@@ -184,29 +257,30 @@ local function parse_dejagnu_options(test_file)
 				end
 			end
 
-			-- Look for dg-require-effective-target with fopenmp
 			if comment:match("{ dg%-require%-effective%-target fopenmp }") then
 				table.insert(options, "-fopenmp")
 			end
 
-			-- Look for std= requirements
-			local std_req = comment:match("{ dg%-require%-effective%-target c%+%+(%d+)") or comment:match("c%+%+(%d+)")
-			if std_req and not line:match("dg%-options") then
-				-- Only add if not already in dg-options
-				local has_std = false
-				for _, opt in ipairs(options) do
-					if opt:match("-std=") then
-						has_std = true
-						break
+			-- C++ standard version detection (only for C++ frontend)
+			if active_frontend_key == "cpp" then
+				local std_req = comment:match("{ dg%-require%-effective%-target c%+%+(%d+)")
+					or comment:match("c%+%+(%d+)")
+				if std_req and not line:match("dg%-options") then
+					local has_std = false
+					for _, opt in ipairs(options) do
+						if opt:match("-std=") then
+							has_std = true
+							break
+						end
 					end
-				end
-				if not has_std then
-					table.insert(options, "-std=c++" .. std_req)
+					if not has_std then
+						table.insert(options, "-std=c++" .. std_req)
+					end
 				end
 			end
 		end
 
-		-- Handle C style comment blocks
+		-- Handle /* */ style comment blocks
 		if line:match("/%*") then
 			in_comment_block = true
 		end
@@ -219,7 +293,6 @@ local function parse_dejagnu_options(test_file)
 			if dg_additional then
 				table.insert(options, dg_additional)
 			end
-			-- Check for dg-add-options in C comments too
 			local dg_add = line:match("{ dg%-add%-options (%S+)")
 			if dg_add then
 				local feature_flags = {
@@ -251,11 +324,51 @@ local function parse_dejagnu_options(test_file)
 	return table.concat(options, " ")
 end
 
--- Helper function to extract cc1plus command from xg++ -v output
-local function get_cc1plus_command(test_file, extra_args)
+-- =============================================================================
+-- Build command construction
+-- =============================================================================
+
+-- Build the driver command with proper include paths and flags
+-- For C++: xg++ -B... -nostdinc++ -I(libstdc++ paths)... <extra_args> <test_file>
+-- For Rust: gccrs -B... <extra_args> <test_file>
+local function build_driver_command(gcc_root, build_root, target_arch, extra_args, test_file)
+	local fe = get_frontend()
+	local gcc_build = build_root .. "/gcc"
+	local driver_path = gcc_build .. "/" .. fe.driver
+
+	if fe.needs_libstdcxx and target_arch then
+		local libstdcxx_build = build_root .. "/" .. target_arch .. "/libstdc++-v3"
+		local libstdcxx_source = gcc_root .. "/libstdc++-v3"
+
+		return string.format(
+			"%s -B%s -nostdinc++ "
+				.. "-I%s/include/%s "
+				.. "-I%s/include "
+				.. "-I%s/libsupc++ "
+				.. "-I%s/include/backward "
+				.. "-I%s/testsuite/util "
+				.. "%s %s",
+			driver_path,
+			gcc_build,
+			libstdcxx_build,
+			target_arch,
+			libstdcxx_build,
+			libstdcxx_source,
+			libstdcxx_source,
+			libstdcxx_source,
+			extra_args,
+			test_file
+		)
+	else
+		return string.format("%s -B%s %s %s", driver_path, gcc_build, extra_args, test_file)
+	end
+end
+
+-- Extract the frontend binary command from driver -v output
+-- e.g. extracts the cc1plus or crab1 invocation line
+local function get_frontend_command(test_file, extra_args)
 	extra_args = extra_args or ""
 
-	-- Parse DejaGNU options from the test file
 	local dejagnu_opts = parse_dejagnu_options(test_file)
 	if dejagnu_opts ~= "" then
 		vim.notify("Parsed test options: " .. dejagnu_opts, vim.log.levels.INFO)
@@ -267,58 +380,84 @@ local function get_cc1plus_command(test_file, extra_args)
 		return nil
 	end
 
-	local libstdcxx_build = build_root .. "/" .. target_arch .. "/libstdc++-v3"
-	local libstdcxx_source = gcc_root .. "/libstdc++-v3"
-	local xgpp_path = build_root .. "/gcc/xg++"
-	local gcc_build = build_root .. "/gcc"
+	local fe = get_frontend()
+	local driver_cmd =
+		build_driver_command(gcc_root, build_root, target_arch, extra_args .. " " .. fe.verbose_flag, test_file)
+	local full_cmd = driver_cmd .. " 2>&1"
 
-	local xgpp_cmd = string.format(
-		"%s -B%s -nostdinc++ "
-			.. "-I%s/include/%s "
-			.. "-I%s/include "
-			.. "-I%s/libsupc++ "
-			.. "-I%s/include/backward "
-			.. "-I%s/testsuite/util "
-			.. "%s -v %s 2>&1",
-		xgpp_path,
-		gcc_build,
-		libstdcxx_build,
-		target_arch,
-		libstdcxx_build,
-		libstdcxx_source,
-		libstdcxx_source,
-		libstdcxx_source,
-		extra_args,
-		test_file
-	)
-
-	local handle = io.popen(xgpp_cmd)
+	local handle = io.popen(full_cmd)
 	local output = handle:read("*a")
 	handle:close()
 
-	-- Extract the cc1plus invocation from -v output
-	-- The cc1plus command may be split across multiple lines if the terminal wraps it
-	-- We need to find the line starting with the cc1plus path
-	local cc1plus_line = nil
+	-- Extract the frontend binary invocation from -v output
+	local pattern = "/" .. fe.frontend_binary .. "%s"
+	local alt_pattern = "^%s*" .. fe.frontend_binary .. "%s"
 
+	local frontend_line = nil
 	for line in output:gmatch("[^\r\n]+") do
-		-- Check if this line contains the cc1plus invocation
-		if line:match("/cc1plus%s") or line:match("^%s*cc1plus%s") then
-			cc1plus_line = line
+		if line:match(pattern) or line:match(alt_pattern) then
+			frontend_line = line
 			break
 		end
 	end
 
-	if cc1plus_line then
-		-- Trim leading/trailing whitespace
-		cc1plus_line = cc1plus_line:match("^%s*(.-)%s*$")
-		-- Normalize multiple spaces to single spaces (handles terminal line-wrap artifacts)
-		cc1plus_line = cc1plus_line:gsub("%s+", " ")
-		return cc1plus_line
+	if frontend_line then
+		frontend_line = frontend_line:match("^%s*(.-)%s*$")
+		frontend_line = frontend_line:gsub("%s+", " ")
+		return frontend_line
 	end
 
 	return nil
 end
+
+-- =============================================================================
+-- Commands
+-- =============================================================================
+
+-- Switch frontend
+vim.api.nvim_create_user_command("GccSetFrontend", function(opts)
+	local key = opts.args:lower()
+	if key == "c++" or key == "cpp" or key == "g++" then
+		key = "cpp"
+	elseif key == "rust" or key == "gccrs" or key == "rs" then
+		key = "rust"
+	end
+
+	if not frontends[key] then
+		local available = {}
+		for k, v in pairs(frontends) do
+			table.insert(available, k .. " (" .. v.name .. ")")
+		end
+		vim.notify(
+			"Unknown frontend: " .. opts.args .. "\nAvailable: " .. table.concat(available, ", "),
+			vim.log.levels.ERROR
+		)
+		return
+	end
+
+	active_frontend_key = key
+	vim.notify("Switched to frontend: " .. frontends[key].name, vim.log.levels.INFO)
+end, {
+	nargs = 1,
+	complete = function()
+		return { "cpp", "rust" }
+	end,
+})
+
+-- Show current frontend
+vim.api.nvim_create_user_command("GccFrontend", function()
+	local fe = get_frontend()
+	vim.notify(
+		string.format(
+			"Active frontend: %s (%s)\nDriver: %s | Binary: %s",
+			active_frontend_key,
+			fe.name,
+			fe.driver,
+			fe.frontend_binary
+		),
+		vim.log.levels.INFO
+	)
+end, { nargs = 0 })
 
 -- Help command
 vim.api.nvim_create_user_command("GccHelp", function()
@@ -326,113 +465,93 @@ vim.api.nvim_create_user_command("GccHelp", function()
 GCC Development Plugin for Neovim
 ==================================
 
-This plugin streamlines GCC C++ compiler development by providing commands to
+This plugin streamlines GCC compiler development by providing commands to
 debug, test, and navigate the GCC testsuite directly from Neovim.
+Supports multiple frontends: C++ (g++) and Rust (gccrs).
 
 QUICK START:
 -----------
 1. Open Neovim from anywhere in your GCC source tree
 2. Run :GccCheck to verify your environment
-3. Use :FindTest to search for tests
-4. Press 'd' on a test to debug it with GDB
+3. Use :GccSetFrontend rust  to switch to gccrs (default: cpp)
+4. Use :FindTest to search for tests
+5. Press 'd' on a test to debug it with GDB
 
-COMMANDS:
----------
+FRONTEND COMMANDS:
+-----------------
+
+:GccSetFrontend <frontend>
+    Switch active frontend. Accepts: cpp, rust (also: g++, gccrs, rs, c++)
+    Default: cpp
+
+:GccFrontend
+    Show the currently active frontend.
+
+TEST COMMANDS:
+--------------
 
 :FindTest <pattern>
-    Search for test files matching a pattern in the testsuite.
-    Opens results in a split window with helpful keybindings.
+    Search for test files in the active frontend's testsuite.
+    C++:  searches gcc/testsuite/g++.dg/ for .C/.cc files
+    Rust: searches gcc/testsuite/rust/ for .rs files
     
     Keybindings in results window:
       <CR> - Open the test file for editing
-      d    - Debug with GDB (runs :GdbCC1plus)
+      d    - Debug with GDB (runs :GdbFrontend)
       r    - Compile test (runs :RunTest)
       t    - Run via testsuite (runs :RunTestsuite)
-      l    - Show test log (g++.log)
+      l    - Show test log
       q    - Close the results window
-    
-    Examples:
-      :FindTest constexpr     " Find all constexpr tests
-      :FindTest cpp26/const   " Find all C++26 tests with const 
-      :FindTest template      " Find template-related tests
 
-:GdbCC1plus <test_file> [flags]
-    Debug a test file with GDB. Automatically extracts the cc1plus command
-    from xg++ including all the right include paths and flags.
+:GdbFrontend <test_file> [flags]
+    Debug a test file with GDB. Extracts the frontend binary command
+    (cc1plus for C++, crab1 for Rust) from the driver's verbose output.
+    Uses -v for xg++ and --verbose for gccrs.
+    Also available as :GdbCC1plus (alias).
     
     Examples:
-      :GdbCC1plus gcc/testsuite/g++.dg/cpp26/constexpr-virt1.C
-      :GdbCC1plus gcc/testsuite/g++.dg/cpp26/test.C -O2 -g
+      :GdbFrontend gcc/testsuite/g++.dg/cpp26/constexpr-virt1.C
+      :GdbFrontend gcc/testsuite/rust/compile/test.rs
 
 :RunTest <test_file>
-    Quickly compile a test file using xg++ with proper libstdc++ paths.
-    Automatically parses DejaGNU directives (dg-options, dg-additional-options,
-    dg-add-options, dg-require-effective-target).
-    Opens compilation result in a terminal window.
-    
-    Examples:
-      :RunTest gcc/testsuite/g++.dg/template/crash1.C
-      :RunTest gcc/testsuite/g++.dg/cpp2a/concepts-fn1.C
+    Quickly compile a test file using the active frontend's driver
+    with proper paths. Parses DejaGNU directives automatically.
 
 :RunTestsuite <test_file>
-    Run the full DejaGNU testsuite for a specific test via 'make check-g++'.
-    This is the "official" way to run tests and see PASS/FAIL results.
-    Results are logged to build/gcc/testsuite/g++/g++.log
-    
-    Example:
-      :RunTestsuite gcc/testsuite/g++.dg/cpp26/constexpr-virt1.C
+    Run the full DejaGNU testsuite for a specific test.
+    C++:  make check-g++ RUNTESTFLAGS="dg.exp=<file>"
+    Rust: auto-detects the test set from the path:
+          rust/compile/foo.rs -> compile.exp=foo.rs
+          rust/execute/bar.rs -> execute.exp=bar.rs
 
 :ShowTestOptions <test_file>
-    Display DejaGNU directives found in a test file (dg-options, etc.).
-    Useful for understanding what flags a test expects.
-    
-    Example:
-      :ShowTestOptions gcc/testsuite/g++.dg/cpp26/constexpr-virt1.C
+    Display DejaGNU directives found in a test file.
 
 :ShowTestLog
-    Display the g++.log file from the last testsuite run.
-    Shows PASS/FAIL results and any compiler output.
-    Press 'q' to close the log viewer.
+    Display the test log from the last testsuite run.
 
 :GccCheck
-    Verify your GCC environment is set up correctly.
-    Checks for xg++, cc1plus, libstdc++ paths, etc.
-    Also displays the detected target architecture.
+    Verify your GCC environment for the active frontend.
 
 SETUP REQUIREMENTS:
 ------------------
 - GCC source tree with gcc/ directory
 - build/ directory (either inside source or as a sibling)
-- Compiled xg++ and cc1plus in build/gcc/
-- libstdc++-v3 built in build/<target-triplet>/
+- For C++:  xg++, cc1plus, and libstdc++-v3 built
+- For Rust: gccrs and crab1 built
 
 The plugin supports two directory structures:
   Structure 1: gcc-source/gcc/ and gcc-source/build/
   Structure 2: source/gcc/ and build/ (as siblings)
 
-The plugin will auto-detect your GCC root and build directory by walking
-up from your current directory. No manual configuration needed!
-
-Supported architectures: x86_64, aarch64, arm, powerpc64le, riscv64, s390x, i686
-
-DEJAGNU DIRECTIVES PARSED:
---------------------------
-The plugin automatically parses these DejaGNU directives:
-- dg-options: Compiler options
-- dg-additional-options: Additional compiler options
-- dg-add-options: Feature-based options (pthread, tls, openmp, etc.)
-- dg-require-effective-target: Target requirements (c++NN, fopenmp)
-
 TROUBLESHOOTING:
 ---------------
-- "GCC source not found": Open Neovim from inside your GCC source tree
-- "Build directory not found": Ensure build/ exists in or next to source
-- "xg++ not found": Run 'make' in your build directory
-- "Target architecture not detected": Ensure libstdc++ is built
-- "No tests found": Check your search pattern or testsuite path
+- "driver not found": Run 'make' in your build directory
+- "frontend binary not found": The frontend may not be built
+- For gccrs: ensure you configured with --enable-languages=rust
+- Use :GccCheck to diagnose environment issues
 
-For more info or to report issues:
-https://github.com/riogu/gcc1plus
+For more info: https://github.com/riogu/gcc1plus
 ]]
 
 	local buf = vim.api.nvim_create_buf(false, true)
@@ -452,6 +571,7 @@ end, { nargs = 0 })
 
 -- Environment check command
 vim.api.nvim_create_user_command("GccCheck", function()
+	local fe = get_frontend()
 	local gcc_root = get_gcc_root()
 
 	if not gcc_root then
@@ -465,8 +585,7 @@ vim.api.nvim_create_user_command("GccCheck", function()
 	local build_root = get_build_root(gcc_root)
 	if not build_root then
 		vim.notify(
-			"✗ Build directory not found.\n"
-				.. "Expected build/ either inside source or as a sibling.",
+			"✗ Build directory not found.\n" .. "Expected build/ either inside source or as a sibling.",
 			vim.log.levels.ERROR
 		)
 		return
@@ -477,25 +596,48 @@ vim.api.nvim_create_user_command("GccCheck", function()
 	local checks = {
 		{ path = gcc_root .. "/gcc", desc = "GCC source directory" },
 		{ path = build_root, desc = "Build directory" },
-		{ path = build_root .. "/gcc/xg++", desc = "xg++ compiler", executable = true },
-		{ path = build_root .. "/gcc/cc1plus", desc = "cc1plus binary", executable = true },
 		{
+			path = build_root .. "/gcc/" .. fe.driver,
+			desc = fe.name .. " driver (" .. fe.driver .. ")",
+			executable = true,
+		},
+		{
+			path = build_root .. "/gcc/" .. fe.frontend_binary,
+			desc = fe.name .. " frontend (" .. fe.frontend_binary .. ")",
+			executable = true,
+		},
+	}
+
+	-- Add libstdc++ checks only for frontends that need it
+	if fe.needs_libstdcxx then
+		table.insert(checks, {
 			path = target_arch and (build_root .. "/" .. target_arch .. "/libstdc++-v3") or "",
 			desc = "libstdc++ build",
-		},
-		{ path = gcc_root .. "/libstdc++-v3", desc = "libstdc++ source" },
-	}
+		})
+		table.insert(checks, { path = gcc_root .. "/libstdc++-v3", desc = "libstdc++ source" })
+	end
+
+	-- Add testsuite directory check
+	table.insert(checks, {
+		path = gcc_root .. "/gcc/testsuite/" .. fe.testsuite_subdir,
+		desc = fe.name .. " testsuite directory",
+	})
 
 	local all_ok = true
 	local results = {
-		"GCC Environment Check",
+		"GCC Environment Check [" .. fe.name .. "]",
 		"===================",
 		"",
+		"Frontend:   " .. fe.name .. " (" .. active_frontend_key .. ")",
 		"GCC Source: " .. gcc_root,
 		"Build Root: " .. build_root,
-		"Target:     " .. (target_arch or "NOT DETECTED"),
-		"",
 	}
+
+	if fe.needs_libstdcxx then
+		table.insert(results, "Target:     " .. (target_arch or "NOT DETECTED"))
+	end
+
+	table.insert(results, "")
 
 	for _, check in ipairs(checks) do
 		if check.path == "" then
@@ -520,19 +662,23 @@ vim.api.nvim_create_user_command("GccCheck", function()
 
 	table.insert(results, "")
 	if all_ok then
-		table.insert(results, "✓ All checks passed! GCC is correctly built and configured.")
+		table.insert(results, "✓ All checks passed! " .. fe.name .. " environment is ready.")
 	else
 		table.insert(results, '✗ Some checks failed. You may need to run "make" in your build directory.')
+		if active_frontend_key == "rust" then
+			table.insert(results, "  Hint: ensure you configured with --enable-languages=rust")
+		end
 	end
 
 	vim.notify(table.concat(results, "\n"), all_ok and vim.log.levels.INFO or vim.log.levels.WARN)
 end, { nargs = 0 })
 
--- Debug cc1plus with GDB
-vim.api.nvim_create_user_command("GdbCC1plus", function(opts)
+-- Debug frontend binary with GDB
+local function gdb_frontend_impl(opts)
 	local args = vim.split(opts.args, "%s+")
 	if #args < 1 then
-		vim.notify("Usage: :GdbCC1plus <test_file> [extra_flags]", vim.log.levels.ERROR)
+		local fe = get_frontend()
+		vim.notify("Usage: :GdbFrontend <test_file> [extra_flags]", vim.log.levels.ERROR)
 		return
 	end
 
@@ -544,10 +690,11 @@ vim.api.nvim_create_user_command("GdbCC1plus", function(opts)
 		return
 	end
 
-	vim.notify("Extracting cc1plus command...", vim.log.levels.INFO)
-	local cc1plus_cmd = get_cc1plus_command(test_file, extra_args)
+	local fe = get_frontend()
+	vim.notify("Extracting " .. fe.frontend_binary .. " command...", vim.log.levels.INFO)
+	local frontend_cmd = get_frontend_command(test_file, extra_args)
 
-	if cc1plus_cmd then
+	if frontend_cmd then
 		local gcc_build = build_root .. "/gcc"
 		vim.notify("Starting GDB session for: " .. vim.fn.fnamemodify(test_file, ":t"), vim.log.levels.INFO)
 
@@ -556,11 +703,27 @@ vim.api.nvim_create_user_command("GdbCC1plus", function(opts)
 			vim.cmd("enew")
 		end
 
-		vim.cmd(string.format("GdbStart gdb -cd=%s -x .gdbinit --args %s", gcc_build, cc1plus_cmd))
+		vim.cmd(string.format("GdbStart gdb -cd=%s -x .gdbinit --args %s", gcc_build, frontend_cmd))
 	else
-		vim.notify("Failed to extract cc1plus command. Check if xg++ can compile the test.", vim.log.levels.ERROR)
+		vim.notify(
+			"Failed to extract "
+				.. fe.frontend_binary
+				.. " command.\n"
+				.. "Check if "
+				.. fe.driver
+				.. " can compile the test.\n"
+				.. "Try running: "
+				.. fe.driver
+				.. " -v "
+				.. test_file,
+			vim.log.levels.ERROR
+		)
 	end
-end, { nargs = "+", complete = "file" })
+end
+
+vim.api.nvim_create_user_command("GdbFrontend", gdb_frontend_impl, { nargs = "+", complete = "file" })
+-- Keep the old name as an alias for backward compatibility
+vim.api.nvim_create_user_command("GdbCC1plus", gdb_frontend_impl, { nargs = "+", complete = "file" })
 
 -- Show DejaGNU directives
 vim.api.nvim_create_user_command("ShowTestOptions", function(opts)
@@ -578,6 +741,30 @@ vim.api.nvim_create_user_command("ShowTestOptions", function(opts)
 		vim.notify("No DejaGNU options found in: " .. vim.fn.fnamemodify(test_file, ":t"), vim.log.levels.WARN)
 	end
 end, { nargs = 1, complete = "file" })
+
+-- Build RUNTESTFLAGS string for a given test file
+-- For C++: "dg.exp=<filename>"
+-- For Rust: infers exp from directory, e.g. rust/compile/foo.rs -> "--all compile.exp=foo.rs"
+local function get_runtestflags(test_file)
+	local fe = get_frontend()
+	local filename = test_file:match("([^/]+)$")
+
+	if fe.runtestflags_fmt then
+		return string.format(fe.runtestflags_fmt, filename)
+	end
+
+	-- For gccrs: infer test set from the parent directory
+	-- e.g. .../rust/compile/foo.rs -> compile
+	--      .../rust/execute/bar.rs -> execute
+	local test_set = test_file:match("/rust/([^/]+)/[^/]+$")
+	if test_set then
+		return string.format("--all %s.exp=%s", test_set, filename)
+	end
+
+	-- Fallback: compile.exp
+	vim.notify("Could not infer test set from path, defaulting to compile.exp", vim.log.levels.WARN)
+	return string.format("--all compile.exp=%s", filename)
+end
 
 -- Run test via full testsuite
 vim.api.nvim_create_user_command("RunTestsuite", function(opts)
@@ -599,9 +786,12 @@ vim.api.nvim_create_user_command("RunTestsuite", function(opts)
 		return
 	end
 
+	local fe = get_frontend()
 	local build_gcc = build_root .. "/gcc"
-	local cmd = string.format('cd %s && make check-g++ RUNTESTFLAGS="dg.exp=%s"', build_gcc, filename)
+	local runtestflags = get_runtestflags(test_file)
+	local cmd = string.format('cd %s && make %s RUNTESTFLAGS="%s"', build_gcc, fe.check_target, runtestflags)
 
+	vim.notify("Running testsuite: " .. fe.check_target .. " " .. runtestflags, vim.log.levels.INFO)
 	vim.cmd("terminal " .. cmd)
 end, { nargs = 1, complete = "file" })
 
@@ -612,21 +802,18 @@ vim.api.nvim_create_user_command("ShowTestLog", function()
 		return
 	end
 
-	local log_patterns = {
-		build_root .. "/gcc/testsuite/g++/g++.log",
-		build_root .. "/gcc/testsuite/g++.log",
-	}
-
+	local fe = get_frontend()
 	local log_file = nil
-	for _, pattern in ipairs(log_patterns) do
-		if vim.fn.filereadable(pattern) == 1 then
-			log_file = pattern
+	for _, pattern in ipairs(fe.log_patterns) do
+		local full_path = build_root .. "/" .. pattern
+		if vim.fn.filereadable(full_path) == 1 then
+			log_file = full_path
 			break
 		end
 	end
 
 	if not log_file then
-		vim.notify("Test log not found. Run :RunTestsuite first to generate logs.", vim.log.levels.WARN)
+		vim.notify(fe.name .. " test log not found. Run :RunTestsuite first to generate logs.", vim.log.levels.WARN)
 		return
 	end
 
@@ -644,7 +831,7 @@ vim.api.nvim_create_user_command("ShowTestLog", function()
 
 	vim.api.nvim_win_set_buf(0, buf)
 	vim.api.nvim_buf_set_keymap(buf, "n", "q", ":q<CR>", { noremap = true, silent = true })
-	vim.notify("Showing test log (press q to close)", vim.log.levels.INFO)
+	vim.notify("Showing " .. fe.name .. " test log (press q to close)", vim.log.levels.INFO)
 end, { nargs = 0 })
 
 -- Run test quickly
@@ -660,37 +847,25 @@ vim.api.nvim_create_user_command("RunTest", function(opts)
 		return
 	end
 
+	local fe = get_frontend()
 	local dejagnu_opts = parse_dejagnu_options(test_file)
-	local libstdcxx_build = build_root .. "/" .. target_arch .. "/libstdc++-v3"
-	local libstdcxx_source = gcc_root .. "/libstdc++-v3"
-	local xgpp_path = build_root .. "/gcc/xg++"
 	local gcc_build = build_root .. "/gcc"
 	local abs_test_file = vim.fn.fnamemodify(test_file, ":p")
 
 	local cmd = string.format(
-		"cd %s && %s -B%s -nostdinc++ "
-			.. "-I%s/include/%s "
-			.. "-I%s/include "
-			.. "-I%s/libsupc++ "
-			.. "-I%s/include/backward "
-			.. "-I%s/testsuite/util "
-			.. "%s %s",
+		"cd %s && %s",
 		gcc_build,
-		xgpp_path,
-		gcc_build,
-		libstdcxx_build,
-		target_arch,
-		libstdcxx_build,
-		libstdcxx_source,
-		libstdcxx_source,
-		libstdcxx_source,
-		dejagnu_opts,
-		abs_test_file
+		build_driver_command(gcc_root, build_root, target_arch, dejagnu_opts, abs_test_file)
 	)
 
 	local test_name = vim.fn.fnamemodify(test_file, ":t")
 	vim.notify(
-		"Compiling: " .. test_name .. (dejagnu_opts ~= "" and " (with options: " .. dejagnu_opts .. ")" or ""),
+		string.format(
+			"[%s] Compiling: %s%s",
+			fe.name,
+			test_name,
+			dejagnu_opts ~= "" and " (with options: " .. dejagnu_opts .. ")" or ""
+		),
 		vim.log.levels.INFO
 	)
 	vim.cmd("terminal " .. cmd)
@@ -709,10 +884,17 @@ vim.api.nvim_create_user_command("FindTest", function(opts)
 		return
 	end
 
-	local testsuite_path = gcc_root .. "/gcc/testsuite/g++.dg"
-	local find_cmd = string.format("find %s -path '*%s*.C' -o -path '*%s*.cc'", testsuite_path, pattern, pattern)
+	local fe = get_frontend()
+	local testsuite_path = gcc_root .. "/gcc/testsuite/" .. fe.testsuite_subdir
 
-	vim.notify("Searching for tests matching: " .. pattern, vim.log.levels.INFO)
+	-- Build find command for all supported extensions
+	local ext_patterns = {}
+	for _, ext in ipairs(fe.test_extensions) do
+		table.insert(ext_patterns, string.format("-path '*%s*.%s'", pattern, ext))
+	end
+	local find_cmd = string.format("find %s %s", testsuite_path, table.concat(ext_patterns, " -o "))
+
+	vim.notify(string.format("[%s] Searching for tests matching: %s", fe.name, pattern), vim.log.levels.INFO)
 
 	local handle = io.popen(find_cmd)
 	local results = handle:read("*a")
@@ -724,11 +906,10 @@ vim.api.nvim_create_user_command("FindTest", function(opts)
 	end
 
 	if #lines == 0 then
-		vim.notify("No tests found matching: " .. pattern, vim.log.levels.WARN)
+		vim.notify("No tests found matching: " .. pattern .. " in " .. fe.testsuite_subdir, vim.log.levels.WARN)
 		return
 	end
 
-	-- Create a unique buffer without trying to set a name
 	local buf = vim.api.nvim_create_buf(false, true)
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 	vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
@@ -743,10 +924,9 @@ vim.api.nvim_create_user_command("FindTest", function(opts)
 		return vim.fn.fnameescape(line)
 	end
 
-	-- Keybindings for test results
 	local keymaps = {
 		{ key = "<CR>", cmd = "edit", desc = "Open test file" },
-		{ key = "d", cmd = "GdbCC1plus", desc = "Debug with GDB" },
+		{ key = "d", cmd = "GdbFrontend", desc = "Debug with GDB" },
 		{ key = "r", cmd = "RunTest", desc = "Compile test" },
 		{ key = "t", cmd = "RunTestsuite", desc = "Run via testsuite" },
 		{ key = "l", cmd = "ShowTestLog", desc = "Show test log", no_arg = true },
@@ -774,7 +954,11 @@ vim.api.nvim_create_user_command("FindTest", function(opts)
 	end
 
 	vim.notify(
-		string.format("Found %d tests. Use: <CR>=open | d=debug | r=compile | t=testsuite | l=log | q=quit", #lines),
+		string.format(
+			"[%s] Found %d tests. Use: <CR>=open | d=debug | r=compile | t=testsuite | l=log | q=quit",
+			fe.name,
+			#lines
+		),
 		vim.log.levels.INFO
 	)
 end, { nargs = 1 })
