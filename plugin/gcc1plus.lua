@@ -46,6 +46,9 @@ local frontends = {
 		runtestflags_fmt = nil, -- uses get_runtestflags() instead
 		-- gccrs uses --verbose instead of -v
 		verbose_flag = "--verbose",
+		-- Flags always needed when invoking the driver directly (not via testsuite)
+		-- The testsuite adds this implicitly, but direct invocations need it
+		default_driver_flags = "-frust-incomplete-and-experimental-compiler-do-not-use",
 	},
 }
 
@@ -151,12 +154,8 @@ local function validate_gcc_env()
 			"Could not find build directory.\n"
 				.. "Expected build/ either inside the GCC source directory or as a sibling to it.\n"
 				.. "Looked for:\n"
-				.. "  - "
-				.. gcc_root
-				.. "/build\n"
-				.. "  - "
-				.. vim.fn.fnamemodify(gcc_root, ":h")
-				.. "/build",
+				.. "  - " .. gcc_root .. "/build\n"
+				.. "  - " .. vim.fn.fnamemodify(gcc_root, ":h") .. "/build",
 			vim.log.levels.ERROR
 		)
 		return nil, nil, nil
@@ -167,13 +166,8 @@ local function validate_gcc_env()
 	local driver_path = build_gcc .. "/" .. fe.driver
 	if vim.fn.executable(driver_path) ~= 1 then
 		vim.notify(
-			fe.name
-				.. " driver not found.\n"
-				.. "Expected "
-				.. fe.driver
-				.. " at: "
-				.. driver_path
-				.. "\n"
+			fe.name .. " driver not found.\n"
+				.. "Expected " .. fe.driver .. " at: " .. driver_path .. "\n"
 				.. 'Please run "make" in your build directory first.',
 			vim.log.levels.ERROR
 		)
@@ -184,13 +178,8 @@ local function validate_gcc_env()
 	local frontend_path = build_gcc .. "/" .. fe.frontend_binary
 	if vim.fn.executable(frontend_path) ~= 1 then
 		vim.notify(
-			fe.name
-				.. " frontend binary not found.\n"
-				.. "Expected "
-				.. fe.frontend_binary
-				.. " at: "
-				.. frontend_path
-				.. "\n"
+			fe.name .. " frontend binary not found.\n"
+				.. "Expected " .. fe.frontend_binary .. " at: " .. frontend_path .. "\n"
 				.. 'Please run "make" in your build directory first.',
 			vim.log.levels.ERROR
 		)
@@ -336,6 +325,11 @@ local function build_driver_command(gcc_root, build_root, target_arch, extra_arg
 	local gcc_build = build_root .. "/gcc"
 	local driver_path = gcc_build .. "/" .. fe.driver
 
+	-- Prepend any default flags the frontend always needs for direct invocation
+	if fe.default_driver_flags then
+		extra_args = fe.default_driver_flags .. " " .. extra_args
+	end
+
 	if fe.needs_libstdcxx and target_arch then
 		local libstdcxx_build = build_root .. "/" .. target_arch .. "/libstdc++-v3"
 		local libstdcxx_source = gcc_root .. "/libstdc++-v3"
@@ -381,8 +375,7 @@ local function get_frontend_command(test_file, extra_args)
 	end
 
 	local fe = get_frontend()
-	local driver_cmd =
-		build_driver_command(gcc_root, build_root, target_arch, extra_args .. " " .. fe.verbose_flag, test_file)
+	local driver_cmd = build_driver_command(gcc_root, build_root, target_arch, extra_args .. " " .. fe.verbose_flag, test_file)
 	local full_cmd = driver_cmd .. " 2>&1"
 
 	local handle = io.popen(full_cmd)
@@ -448,13 +441,7 @@ end, {
 vim.api.nvim_create_user_command("GccFrontend", function()
 	local fe = get_frontend()
 	vim.notify(
-		string.format(
-			"Active frontend: %s (%s)\nDriver: %s | Binary: %s",
-			active_frontend_key,
-			fe.name,
-			fe.driver,
-			fe.frontend_binary
-		),
+		string.format("Active frontend: %s (%s)\nDriver: %s | Binary: %s", active_frontend_key, fe.name, fe.driver, fe.frontend_binary),
 		vim.log.levels.INFO
 	)
 end, { nargs = 0 })
@@ -596,16 +583,8 @@ vim.api.nvim_create_user_command("GccCheck", function()
 	local checks = {
 		{ path = gcc_root .. "/gcc", desc = "GCC source directory" },
 		{ path = build_root, desc = "Build directory" },
-		{
-			path = build_root .. "/gcc/" .. fe.driver,
-			desc = fe.name .. " driver (" .. fe.driver .. ")",
-			executable = true,
-		},
-		{
-			path = build_root .. "/gcc/" .. fe.frontend_binary,
-			desc = fe.name .. " frontend (" .. fe.frontend_binary .. ")",
-			executable = true,
-		},
+		{ path = build_root .. "/gcc/" .. fe.driver, desc = fe.name .. " driver (" .. fe.driver .. ")", executable = true },
+		{ path = build_root .. "/gcc/" .. fe.frontend_binary, desc = fe.name .. " frontend (" .. fe.frontend_binary .. ")", executable = true },
 	}
 
 	-- Add libstdc++ checks only for frontends that need it
@@ -706,16 +685,9 @@ local function gdb_frontend_impl(opts)
 		vim.cmd(string.format("GdbStart gdb -cd=%s -x .gdbinit --args %s", gcc_build, frontend_cmd))
 	else
 		vim.notify(
-			"Failed to extract "
-				.. fe.frontend_binary
-				.. " command.\n"
-				.. "Check if "
-				.. fe.driver
-				.. " can compile the test.\n"
-				.. "Try running: "
-				.. fe.driver
-				.. " -v "
-				.. test_file,
+			"Failed to extract " .. fe.frontend_binary .. " command.\n"
+				.. "Check if " .. fe.driver .. " can compile the test.\n"
+				.. "Try running: " .. fe.driver .. " -v " .. test_file,
 			vim.log.levels.ERROR
 		)
 	end
@@ -813,7 +785,10 @@ vim.api.nvim_create_user_command("ShowTestLog", function()
 	end
 
 	if not log_file then
-		vim.notify(fe.name .. " test log not found. Run :RunTestsuite first to generate logs.", vim.log.levels.WARN)
+		vim.notify(
+			fe.name .. " test log not found. Run :RunTestsuite first to generate logs.",
+			vim.log.levels.WARN
+		)
 		return
 	end
 
