@@ -1,0 +1,13 @@
+:FindTest	gcc1plus.txt	/*:FindTest*
+:GccCheck	gcc1plus.txt	/*:GccCheck*
+:GccHelp	gcc1plus.txt	/*:GccHelp*
+:GdbCC1plus	gcc1plus.txt	/*:GdbCC1plus*
+:RunTest	gcc1plus.txt	/*:RunTest*
+:RunTestsuite	gcc1plus.txt	/*:RunTestsuite*
+:ShowTestLog	gcc1plus.txt	/*:ShowTestLog*
+:ShowTestOptions	gcc1plus.txt	/*:ShowTestOptions*
+gcc1plus-commands	gcc1plus.txt	/*gcc1plus-commands*
+gcc1plus-contents	gcc1plus.txt	/*gcc1plus-contents*
+gcc1plus-intro	gcc1plus.txt	/*gcc1plus-intro*
+gcc1plus-requirements	gcc1plus.txt	/*gcc1plus-requirements*
+gcc1plus.txt	gcc1plus.txt	/*gcc1plus.txt*

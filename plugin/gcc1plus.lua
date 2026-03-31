@@ -485,6 +485,7 @@ TEST COMMANDS:
     Keybindings in results window:
       <CR> - Open the test file for editing
       d    - Debug with GDB (runs :GdbFrontend)
+      c    - Copy GDB command to clipboard (runs :CopyGdbCommand)
       r    - Compile test (runs :RunTest)
       t    - Run via testsuite (runs :RunTestsuite)
       l    - Show test log
@@ -499,6 +500,10 @@ TEST COMMANDS:
     Examples:
       :GdbFrontend gcc/testsuite/g++.dg/cpp26/constexpr-virt1.C
       :GdbFrontend gcc/testsuite/rust/compile/test.rs
+
+:CopyGdbCommand <test_file> [flags]
+    Same as :GdbFrontend but copies the full GDB command to the clipboard
+    instead of launching GDB. Useful for running GDB in an external terminal.
 
 :RunTest <test_file>
     Quickly compile a test file using the active frontend's driver
@@ -696,6 +701,42 @@ end
 vim.api.nvim_create_user_command("GdbFrontend", gdb_frontend_impl, { nargs = "+", complete = "file" })
 -- Keep the old name as an alias for backward compatibility
 vim.api.nvim_create_user_command("GdbCC1plus", gdb_frontend_impl, { nargs = "+", complete = "file" })
+
+-- Copy GDB command to clipboard instead of launching GDB
+vim.api.nvim_create_user_command("CopyGdbCommand", function(opts)
+	local args = vim.split(opts.args, "%s+")
+	if #args < 1 then
+		vim.notify("Usage: :CopyGdbCommand <test_file> [extra_flags]", vim.log.levels.ERROR)
+		return
+	end
+
+	local test_file = args[1]
+	local extra_args = #args > 1 and table.concat(vim.list_slice(args, 2), " ") or ""
+
+	local gcc_root, build_root, target_arch = validate_gcc_env()
+	if not gcc_root then
+		return
+	end
+
+	local fe = get_frontend()
+	vim.notify("Extracting " .. fe.frontend_binary .. " command...", vim.log.levels.INFO)
+	local frontend_cmd = get_frontend_command(test_file, extra_args)
+
+	if frontend_cmd then
+		local gcc_build = build_root .. "/gcc"
+		local gdb_cmd = string.format("gdb -cd=%s -x .gdbinit --args %s", gcc_build, frontend_cmd)
+		vim.fn.setreg("+", gdb_cmd)
+		vim.fn.setreg('"', gdb_cmd)
+		vim.notify("Copied GDB command to clipboard:\n" .. gdb_cmd, vim.log.levels.INFO)
+	else
+		vim.notify(
+			"Failed to extract " .. fe.frontend_binary .. " command.\n"
+				.. "Check if " .. fe.driver .. " can compile the test.\n"
+				.. "Try running: " .. fe.driver .. " -v " .. test_file,
+			vim.log.levels.ERROR
+		)
+	end
+end, { nargs = "+", complete = "file" })
 
 -- Show DejaGNU directives
 vim.api.nvim_create_user_command("ShowTestOptions", function(opts)
@@ -902,6 +943,7 @@ vim.api.nvim_create_user_command("FindTest", function(opts)
 	local keymaps = {
 		{ key = "<CR>", cmd = "edit", desc = "Open test file" },
 		{ key = "d", cmd = "GdbFrontend", desc = "Debug with GDB" },
+		{ key = "c", cmd = "CopyGdbCommand", desc = "Copy GDB command" },
 		{ key = "r", cmd = "RunTest", desc = "Compile test" },
 		{ key = "t", cmd = "RunTestsuite", desc = "Run via testsuite" },
 		{ key = "l", cmd = "ShowTestLog", desc = "Show test log", no_arg = true },
@@ -930,7 +972,7 @@ vim.api.nvim_create_user_command("FindTest", function(opts)
 
 	vim.notify(
 		string.format(
-			"[%s] Found %d tests. Use: <CR>=open | d=debug | r=compile | t=testsuite | l=log | q=quit",
+			"[%s] Found %d tests. Use: <CR>=open | d=debug | c=copy gdb cmd | r=compile | t=testsuite | l=log | q=quit",
 			fe.name,
 			#lines
 		),
